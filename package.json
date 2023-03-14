@@ -1,0 +1,15 @@
+{
+  "name": "first-project",
+  "version": "1.0.0",
+  "description": "Something new",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "test",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.4"
+  }
+}
