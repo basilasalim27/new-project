@@ -1,18 +1,37 @@
 const sqlite3 = require("sqlite3").verbose();
+const express = require("express");
 
 const db = new sqlite3.Database("./main.db");
-const express = require("express");
 const app = express();
+
 app.use(express.json());
 
-db.run(`CREATE TABLE IF NOT EXISTS post (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  content TEXT,
-  user_id INTEGER,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-)`);
+const authenticate = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const credentials = authHeader.split(" ")[1];
+  const decoded = Buffer.from(credentials, "base64").toString("ascii");
+  const [username, password] = decoded.split(":");
 
-app.post("/register", function (req, res) {
+  db.get(
+    `SELECT id FROM users WHERE email = ? AND password = ?`,
+    [username, password],
+    (error, user) => {
+      if (error) {
+        res.status(500).send("Server error");
+        return;
+      }
+      if (!user) {
+        res.status(401).send("Invalid credentials");
+        return;
+      }
+      console.log("user found");
+      req.userId = user.id;
+      next();
+    }
+  );
+};
+
+app.post("/register", (req, res) => {
   console.log("request", req.body);
 
   const { name, email, password } = req.body;
@@ -20,7 +39,7 @@ app.post("/register", function (req, res) {
   db.run(
     `INSERT INTO users (name, email, password) VALUES (?, ?, ?)`,
     [name, email, password],
-    function (error) {
+    (error, data) => {
       if (error) {
         console.error(error.message);
         res.status(500).send("Server error");
@@ -32,8 +51,8 @@ app.post("/register", function (req, res) {
   );
 });
 
-app.get("/users", function (req, res) {
-  db.all("SELECT * FROM users", function (error, users) {
+app.get("/users", (req, res) => {
+  db.all("SELECT * FROM users", (error, users) => {
     if (error) {
       console.error(error.message);
       res.status(500).json("Server error");
@@ -43,48 +62,96 @@ app.get("/users", function (req, res) {
   });
 });
 
-app.post("/posts", function (req, res) {
+app.post("/posts", authenticate, (req, res) => {
   console.log("request", req.body);
   const { content } = req.body;
-  const authHeader = req.headers.authorization;
-  const credentials = authHeader.split(" ")[1];
-  const decoded = Buffer.from(credentials, "base64").toString("ascii");
-  const [username, password] = decoded.split(":");
 
-  console.log("username:", username);
-  console.log("password:", password);
-
-  db.get(
-    `SELECT id FROM users WHERE email = ? AND password = ?`,
-    [username, password],
-    function (error, user) {
+  db.run(
+    `INSERT INTO post (content, user_id) VALUES (?, ?)`,
+    [content, req.userId],
+    (error, data) => {
       if (error) {
         console.error(error.message);
         res.status(500).send("Server error");
         return;
       }
-      if (!user) {
-        res.status(401).send("Invalid credentials");
-        return;
-      }
-
-      console.log("user_id:", user.id);
-
-      db.run(
-        `INSERT INTO post (content, user_id) VALUES (?, ?)`,
-        [content, user.id],
-        function (error) {
-          if (error) {
-            console.error(error.message);
-            res.status(500).send("Server error");
-            return;
-          }
-          console.log(`Post added to database`);
-          res.send(`Post added to database`);
-        }
-      );
+      console.log(`Post added to database`);
+      res.send(`Post added to database`);
     }
   );
+});
+
+app.get("/post/:postId", (req, res) => {
+  const { postId } = req.params;
+
+  db.get(
+    `SELECT post.*, users.name AS author FROM post 
+     JOIN users ON post.user_id = users.id 
+     WHERE post.id = ?`,
+    [postId],
+    (error, post) => {
+      if (error) {
+        console.error(error.message);
+        res.status(500).send("Server error");
+        return;
+      }
+      if (!post) {
+        res.status(404).send("Post not found");
+        return;
+      }
+      res.json(post);
+    }
+  );
+});
+
+app.put("/post/:postId", authenticate, (req, res) => {
+  const { postId } = req.params;
+  const { content } = req.body;
+
+  db.run(
+    `UPDATE post SET content = ? WHERE id = ? AND user_id = ?`,
+    [content, postId, user.id],
+
+    (error, data) => {
+      if (error) {
+        console.error(error.message);
+        res.status(500).send("Server error");
+        return;
+      }
+      console.log(`Post ${postId} updated in database`);
+      res.send(`Post ${postId} updated in database`);
+    }
+  );
+});
+
+app.delete("/post/:postId", authenticate, (req, res) => {
+  const { postId } = req.params;
+
+  db.get(`SELECT user_id FROM post WHERE id = ?`, [postId], (error, post) => {
+    if (error) {
+      console.error(error.message);
+      res.status(500).send("Server error");
+      return;
+    }
+    if (!post || post.user_id !== user.id) {
+      res.status(403).send("Unauthorized");
+      return;
+    }
+    db.run(
+      `DELETE FROM post WHERE id = ? AND user_id = ?`,
+      [postId, user.id],
+      (error, data) => {
+        if (error) {
+          console.error(error.message);
+          res.status(500).send("Server error");
+          return;
+        }
+        console.log("data", data);
+        console.log(`Post ${postId} deleted from database`);
+        res.send(`Post ${postId} deleted from database`);
+      }
+    );
+  });
 });
 
 app.listen(3000);
